@@ -22,18 +22,25 @@ group_key = sys.argv[4]
 before_method = sys.argv[5]
 files_txt_path = sys.argv[6]
 samples_txt_path = sys.argv[7]
+print(len(sys.argv))
+
 try:
     txt_rho = sys.argv[8]
 except IndexError:
     print("Warning: txt_rho parameter not provided. Using un-soupx deal.")
+    
 try:
-    mito_genes = sys.argv[9]
-except IndexError:
-    mito_genes = "None_file"
-try:
-    mito_threshold = float(sys.argv[10])
-except IndexError:
+    if len(sys.argv) in [10, 11]:
+        mito_genes = sys.argv[9] if len(sys.argv) == 11 else sys.argv[8]
+        mito_threshold = float(sys.argv[10]) if len(sys.argv) == 11 else float(sys.argv[9])
+    else:
+        raise ValueError("Invalid number of arguments")
+except (IndexError, ValueError) as e:
+    print(f"Warning: {e}. Using default values for mito_genes and mito_threshold.")
+    mito_genes = "None_mito_genes.csv"
     mito_threshold = 0.05
+print(f"mito_genes: {mito_genes}")
+print(f"mito_threshold: {mito_threshold}")
 
 #from text transform to array
 with open(files_txt_path, 'r') as file:
