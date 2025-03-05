@@ -1,4 +1,4 @@
-# scrublet_delete_double_cell.py 250117
+# scrublet_delete_double_cell.py 250305
 import numpy as np
 import pandas as pd
 import scanpy as sc
@@ -12,6 +12,7 @@ import os
 import sys
 import scrublet
 import leidenalg
+import argparse
 
 #get outdoor parameter
 species = sys.argv[1]
@@ -25,6 +26,14 @@ try:
     txt_rho = sys.argv[8]
 except IndexError:
     print("Warning: txt_rho parameter not provided. Using un-soupx deal.")
+try:
+    mito_genes = sys.argv[9]
+except IndexError:
+    mito_genes = "None_file"
+try:
+    mito_threshold = float(sys.argv[10])
+except IndexError:
+    mito_threshold = 0.05
 
 #from text transform to array
 with open(files_txt_path, 'r') as file:
@@ -80,7 +89,7 @@ def copy_and_process(matrixfile, featuresfile, barcodesfile, target_folder):
             f_out.write(line.strip() + '\t' + line.strip() + '\n')
     os.chdir(original_dir)
 
-def run_scrublet_view(species, input_mingenes, input_mincells, group_key, folder_name_list, trans_path_list):
+def run_scrublet_view(species, input_mingenes, input_mincells, group_key, folder_name_list, trans_path_list, mito_genes, mito_threshold):
     #os.makedirs(species, exist_ok=True)
     #os.chdir(species)
 
@@ -100,7 +109,21 @@ def run_scrublet_view(species, input_mingenes, input_mincells, group_key, folder
     sc.settings.verbosity = 3
     sc.logging.print_versions()
     sc.settings.set_figure_params(dpi=80, facecolor='white')
-    sc.pp.calculate_qc_metrics(adata, inplace=True, log1p=True)
+    
+    # Check mitogenes and filter
+    if os.path.exists(mito_genes):
+        mt_genes = pd.read_csv(mito_genes, header=None, names=["gene_name"])
+        mt_genes_list = mt_genes["gene_name"].tolist()
+        print(mt_genes_list[:10])
+        adata.var["mt"] = adata.var_names.isin(mt_genes)
+        print("calculate mt genes")
+        sc.pp.calculate_qc_metrics(adata,qc_vars=["mt"],inplace=True,log1p=True)
+        sc.pl.violin(adata,["n_genes_by_counts", "total_counts", "pct_counts_mt"],jitter=0.4,multi_panel=True,save="_mitogene.pdf")
+        sc.pl.scatter(adata, "total_counts", "n_genes_by_counts", color="pct_counts_mt", save="_mitogenes.pdf")
+        adata = adata[adata.obs.pct_counts_mt < mito_threshold].copy()
+    else:
+        print("mitochondrial list not exist")
+        sc.pp.calculate_qc_metrics(adata, inplace=True, log1p=True)
     sns.jointplot(data=adata.obs, x="log1p_total_counts", y="log1p_n_genes_by_counts", kind="hex")
     savefig("qc.pdf")
 
@@ -108,6 +131,7 @@ def run_scrublet_view(species, input_mingenes, input_mincells, group_key, folder
     sc.pp.filter_cells(adata, min_genes=input_mingenes)
     sc.pp.filter_genes(adata, min_cells=input_mincells)
     sc.external.pp.scrublet(adata, batch_key=group_key)
+
     adata.layers["counts"] = adata.X.copy()
 
     # Visualization
@@ -123,9 +147,9 @@ def run_scrublet_view(species, input_mingenes, input_mincells, group_key, folder
     sc.tl.leiden(adata, resolution=1)
     adata.obs['predicted_doublet'] = adata.obs['predicted_doublet'].astype('category')
     sc.pl.umap(adata, color=["leiden", "log1p_n_genes_by_counts", "predicted_doublet", "doublet_score"], ncols=2, save="_quality.pdf")
-    for res in [0.02, 0.5, 2.0]:
+    for res in [0.02, 0.5, 0.8, 1.0, 1.3, 1.6, 2.0]:
         sc.tl.leiden(adata, key_added=f"leiden_res_{res:4.2f}", resolution=res)
-    sc.pl.umap(adata, color=["leiden_res_0.02", "leiden_res_0.50", "leiden_res_2.00"], legend_loc="on data", save="_leiden_clus.pdf")
+    sc.pl.umap(adata, color=["leiden_res_0.02", "leiden_res_0.50", "leiden_res_0.80", "leiden_res_1.00", "leiden_res_1.30", "leiden_res_1.60", "leiden_res_2.00"], legend_loc="on data", save="_leiden_clus.pdf")
     sc.tl.rank_genes_groups(adata, groupby="leiden_res_0.50", method="wilcoxon")
     sc.pl.rank_genes_groups_dotplot(adata, groupby="leiden_res_0.50", standard_scale="var", n_genes=5, save="marker.pdf")
     marker = sc.get.rank_genes_groups_df(adata, group=None)
@@ -151,7 +175,7 @@ if len(input_files) > 0:
         barcodesfile = input_files[i] + '/barcodes.tsv.gz'
         copy_and_process(matrixfile, featuresfile, barcodesfile, folder_name_list[i])
     print(trans_path_list)
-    run_scrublet_view(species, input_mingenes, input_mincells, group_key, folder_name_list, trans_path_list)
+    run_scrublet_view(species, input_mingenes, input_mincells, group_key, folder_name_list, trans_path_list, mito_genes, mito_threshold)
 else:
     print("No samples to process")
     with open('summary.txt', 'w') as f:
